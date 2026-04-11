@@ -1,0 +1,195 @@
+services:
+  nginx-rtmp:
+    image: alfg/nginx-rtmp:latest
+    container_name: nginx-rtmp
+    environment:
+      RTMP_PORT: "1935"
+      HTTP_PORT: "80"
+    ports:
+      - "1935:1935"
+      - "8080:80"
+    volumes:
+      # nginx 설정 템플릿 마운트
+      # 컨테이너 시작 시 nginx가 이 템플릿을 기준으로 실제 nginx.conf를 생성/로드함
+      - ./nginx.conf:/etc/nginx/nginx.conf.template
+
+      # nginx 기본 웹 루트(/var/www/html)
+      # 정적 파일(index.html, player 페이지 등)을 서빙
+      - ./www:/var/www/html
+
+      - ./hls:/var/www/hls
+      - ./dash:/var/www/dash
+
+
+  ffmpeg-hls:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: ffmpeg-hls
+    depends_on:
+      - nginx-rtmp
+    restart: unless-stopped
+    volumes:
+      - ./hls:/hls
+    entrypoint: ["ffmpeg"]
+    command:
+      - -hide_banner
+      - -loglevel
+      - info
+      - -fflags
+      - +genpts
+      - -analyzeduration
+      - 10M
+      - -probesize
+      - 10M
+      - -i
+      - rtmp://nginx-rtmp:1935/live/hello
+
+      - -filter_complex
+      - |
+        [0:v]split=3[v720][v480][v360];
+        [v720]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720out];
+        [v480]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480out];
+        [v360]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2[v360out];
+        [0:a]asplit=3[a720][a480][a360]
+
+      - -map
+      - "[v720out]"
+      - -map
+      - "[a720]"
+      - -map
+      - "[v480out]"
+      - -map
+      - "[a480]"
+      - -map
+      - "[v360out]"
+      - -map
+      - "[a360]"
+
+      - -c:v
+      - libx264
+      - -preset
+      - veryfast
+      - -profile:v
+      - main
+      - -g
+      - "60"
+      - -keyint_min
+      - "60"
+      - -sc_threshold
+      - "0"
+
+      - -c:a
+      - aac
+      - -b:a
+      - 128k
+      - -ar
+      - "48000"
+
+      - -b:v:0
+      - 2800k
+      - -b:v:1
+      - 1400k
+      - -b:v:2
+      - 800k
+
+      - -f
+      - hls
+      - -hls_time
+      - "4"
+      - -hls_list_size
+      - "10"
+      - -hls_flags
+      - independent_segments+omit_endlist+delete_segments
+      - -master_pl_name
+      - master.m3u8
+      - -var_stream_map
+      - "v:0,a:0,name:720p v:1,a:1,name:480p v:2,a:2,name:360p"
+      - -hls_segment_filename
+      - /hls/%v/seg_%03d.ts
+      - /hls/%v/prog_index.m3u8
+
+  ffmpeg-dash:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: ffmpeg-dash
+    depends_on:
+      - nginx-rtmp
+    restart: unless-stopped
+    volumes:
+      - ./dash:/dash
+    entrypoint: ["ffmpeg"]
+    command:
+      - -hide_banner
+      - -loglevel
+      - info
+      - -fflags
+      - +genpts
+      - -analyzeduration
+      - 10M
+      - -probesize
+      - 10M
+      - -i
+      - rtmp://nginx-rtmp:1935/live/hello
+
+      - -filter_complex
+      - |
+        [0:v]split=3[v720][v540][v360];
+        [v720]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720out];
+        [v540]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2[v540out];
+        [v360]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2[v360out]
+
+      - -map
+      - "[v720out]"
+      - -map
+      - "[v540out]"
+      - -map
+      - "[v360out]"
+      - -map
+      - 0:a:0?
+
+      - -c:v
+      - libx264
+      - -preset
+      - veryfast
+      - -profile:v
+      - main
+      - -g
+      - "60"
+      - -keyint_min
+      - "60"
+      - -sc_threshold
+      - "0"
+
+      - -b:v:0
+      - 2800k
+      - -b:v:1
+      - 1400k
+      - -b:v:2
+      - 800k
+
+      - -c:a
+      - aac
+      - -b:a
+      - 128k
+      - -ar
+      - "48000"
+
+      - -init_seg_name
+      - rep$$RepresentationID$$/init.$$ext$$
+      - -media_seg_name
+      - rep$$RepresentationID$$/chunk-$$Number%05d$$.$$ext$$
+      
+      - -seg_duration
+      - "4"
+      - -use_template
+      - "1"
+      - -use_timeline
+      - "1"
+      - -window_size
+      - "10"
+      - -adaptation_sets
+      - "id=0,streams=v id=1,streams=a"
+      - -f
+      - dash
+      - /dash/manifest.mpd
+
+
+
