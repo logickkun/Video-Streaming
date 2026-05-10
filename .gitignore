@@ -7,20 +7,24 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Streaming output
+hls/
+dash/
 
+# Dependencies and build output
+node_modules/
+frontEnd/node_modules/
+dist/
+frontEnd/dist/
+dist-ssr/
 
-dash
-hls
-
-node_modules
-dist
-dist-ssr
+# Local env
 *.local
 
-# Editor directories and files
+# Editor and OS files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
